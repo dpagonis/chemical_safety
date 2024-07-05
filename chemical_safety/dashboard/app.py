@@ -183,6 +183,13 @@ def build_course_summary(search_term):
         directory_path = os.path.join(user_static_dir,best_course.replace(' ', ''))
     
     
+=======
+    custom_matched = custom_match(search_term,course_list)
+    best_course = ''
+    if custom_matched:
+        best_course, _ = custom_matched[0]
+    directory_path = os.path.join('static/courses', best_course.replace(' ', ''))
+>>>>>>> 8adb06ca4d24356875955fe94c68c468ae085bd8
     exp_names = [f for f in list_experiments(best_course)]
 
     exp_summary = []
