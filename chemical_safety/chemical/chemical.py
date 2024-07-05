@@ -117,9 +117,12 @@ class chemical:
 
             if response.status_code == 200:
                 data = response.json()
-                suggestions = data['dictionary_terms']['compound']
-                suggestion = sorted(suggestions, key=lambda x: lev.distance(compound_name, x))[0]
-                print(f'No results for "{compound_name}". Trying "{suggestion}"')
+                if 'dictionary_terms' in data.keys():
+                    suggestions = data['dictionary_terms']['compound']
+                    suggestion = sorted(suggestions, key=lambda x: lev.distance(compound_name, x))[0]
+                    print(f'No results for "{compound_name}". Trying "{suggestion}"')
+                else:
+                    raise ValueError(f'No pubchem record found for search term "{compound_name}"') 
 
                 try:
                     cid = self._get_cid(suggestion)
