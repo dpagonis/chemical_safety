@@ -172,7 +172,17 @@ def enumerate(sequence, start=0):
 def build_course_summary(search_term):
     course_list = get_course_list()
     best_course, _ = custom_match(search_term,course_list)[0]
-    directory_path = os.path.join('static/courses', best_course.replace(' ', ''))
+    
+    
+    user_static_dir = CONFIG.get('user_courses_dir', 'None')
+
+    # Check if user has set a valid directory
+    if user_static_dir == "None" or not os.path.exists(os.path.expanduser(user_static_dir)):
+        directory_path = os.path.join('static/courses',best_course.replace(' ', ''))
+    else:
+        directory_path = os.path.join(user_static_dir,best_course.replace(' ', ''))
+    
+    
     exp_names = [f for f in list_experiments(best_course)]
 
     exp_summary = []

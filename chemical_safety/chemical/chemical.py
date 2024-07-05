@@ -175,6 +175,8 @@ class chemical:
 
     def _parse_molecular_info(self):
         molec = None
+        SMILES_string = None 
+        IUPAC_name_string = None
 
         Identifiers = next((item for item in self._full_json['Record']['Section'] if item['TOCHeading'] == 'Names and Identifiers'), None)
         if Identifiers:
