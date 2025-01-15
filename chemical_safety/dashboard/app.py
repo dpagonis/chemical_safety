@@ -1,11 +1,19 @@
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, make_response
 import os
+import platform
 import shutil
 import re
 import json
 from difflib import SequenceMatcher
 from natsort import natsorted
-from datetime import date
+from datetime import date, datetime
+import sqlite3
+
+from reportlab.lib.pagesizes import inch
+from reportlab.lib import colors
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Image, Frame, Spacer, Table, TableStyle
+from reportlab.lib.enums import TA_LEFT
 
 from chemical_safety.chemical import chemical
 
@@ -44,28 +52,120 @@ def create_app():
     def experiment_lookup():
         return render_template('search_form.html', lookup_type='experiment', page_title='Experiment Lookup')
 
-    @app.route('/room_lookup')
+    @app.route('/room_lookup', methods=['GET', 'POST'])
     def room_lookup():
-        # Placeholder for label printing functionality
-        return render_template('room_lookup.html')
+        # Connect to the database
+        inventory_dir = CONFIG['inventory_dir']
+        if os.path.exists(os.path.expanduser(inventory_dir)):
+            conn = sqlite3.connect(inventory_dir)
+            cursor = conn.cursor()
 
-    @app.route('/course_lookup')
+            # Fetch all unique room numbers for the dropdown
+            cursor.execute("SELECT DISTINCT Area FROM inventory ORDER BY Area")
+            rooms = cursor.fetchall()
+
+            selected_room = None
+            room_data = []
+
+            if request.method == 'POST':
+                # Get the selected room from the form
+                selected_room = request.form.get('room')
+
+                # Query to get data for the selected room
+                if selected_room:
+                    cursor.execute("""
+                        SELECT ID, name, Amount, [Additional Location Details], phs
+                        FROM inventory
+                        WHERE Area = ?
+                        ORDER BY name
+                    """, (selected_room,))
+                    room_data = cursor.fetchall()
+
+            conn.close()
+
+            # Pass data to the template
+            return render_template('room_lookup.html', rooms=rooms, room_data=room_data, selected_room=selected_room)
+        else:
+            return render_template('lookup_fail.html',msg='No chemical inventory found')
+
+    @app.route('/course_lookup', methods=['GET', 'POST'])
     def course_lookup():
-        return render_template('search_form.html', lookup_type='course', page_title='Course Lookup')
+        # Path to the courses directory
+        courses_dir = CONFIG['user_courses_dir']
+        if os.path.exists(os.path.expanduser(courses_dir)):
+            # List all available courses
+            courses = [f for f in os.listdir(courses_dir) if os.path.isdir(os.path.join(courses_dir, f))]
 
-    @app.route('/emergency_info')
-    def emergency_info():
-        # Placeholder for displaying emergency information
-        return render_template('emergency_info.html')
+            if request.method == 'POST':
+                selected_course = request.form.get('course')
+                if selected_course:
+                    course_data, course_title = build_course_summary(selected_course)
+                    return render_template('course_lookup.html', lookup_type="course", course_data=course_data, course_title = course_title)
+
+            return render_template('course_dropdown.html', courses=courses, page_title='Course Lookup')
+        else:
+            return render_template('lookup_fail.html',msg='No course directory found')
+
+
+    @app.route('/first_aid')
+    def first_aid():
+        return render_template('search_form.html', lookup_type='first_aid', page_title='Chemical Lookup — First Aid')
 
     @app.route('/secondary_label')
     def secondary_label():
         return render_template('search_form.html', lookup_type='secondary', page_title='Secondary Container Builder')
 
-    @app.route('/phs_list')
+    @app.route('/phs_list', methods=['GET', 'POST'])
     def phs_list():
-        # Placeholder for label printing functionality
-        return render_template('phs_list.html')
+        inventory_dir = CONFIG['inventory_dir']
+        if os.path.exists(os.path.expanduser(inventory_dir)):
+            # Connect to the database
+            conn = sqlite3.connect(CONFIG['inventory_dir'])
+            cursor = conn.cursor()
+
+            # Fetch unique values for Area and Contact for the dropdowns
+            cursor.execute("SELECT DISTINCT Area FROM inventory WHERE phs = TRUE ORDER BY Area")
+            areas = cursor.fetchall()
+
+            cursor.execute("SELECT DISTINCT Contact FROM inventory WHERE phs = TRUE ORDER BY Contact")
+            contacts = cursor.fetchall()
+
+            # Default query to fetch all PHS data
+            query = """
+                SELECT ID, name, Area, Amount, [Additional Location Details], Contact, carcinogen, acute_toxin, reproductive_toxin
+                FROM inventory
+                WHERE phs = TRUE
+            """
+            filters = []
+            params = []
+
+            # Handle filtering if form is submitted
+            if request.method == 'POST':
+                selected_area = request.form.get('area')
+                selected_contact = request.form.get('contact')
+
+                # Add conditions to the query based on selected filters
+                if selected_area and selected_area != 'any':
+                    filters.append("Area = ?")
+                    params.append(selected_area)
+
+                if selected_contact and selected_contact != 'any':
+                    filters.append("Contact = ?")
+                    params.append(selected_contact)
+
+                if filters:
+                    query += " AND " + " AND ".join(filters)
+
+            query += " ORDER BY Area, name"
+            cursor.execute(query, params)
+            phs_data = cursor.fetchall()
+
+            conn.close()
+
+            # Pass data to the template
+            return render_template('phs_list.html', phs_data=phs_data, areas=areas, contacts=contacts)
+        else: 
+            return render_template('lookup_fail.html',msg='No chemical inventory found')
 
     @app.route('/lookup', methods=['GET', 'POST'])
     def lookup():
@@ -83,9 +183,10 @@ def create_app():
                 chemlist,experiment_name = get_experiment_chem_list(search_term)
                 result = [chemical(c) for c in chemlist]
                 return render_template('experiment_lookup.html', lookup_type=lookup_type, result=result, experiment_name = experiment_name)
-            elif lookup_type == 'course':
-                course_data, course_title = build_course_summary(search_term)
-                return render_template('course_lookup.html', lookup_type=lookup_type, course_data=course_data, course_title = course_title)
+            elif lookup_type == 'first_aid':
+                c = chemical(search_term)
+                result = get_first_aid_info(c)
+                return render_template('first_aid_info.html', name=c.full_name, result=result)
             elif lookup_type == 'secondary':
                 result = [chemical(c) for c in search_term.split(', ')]
                 return render_template('secondary_label_builder.html', lookup_type=lookup_type, result=result)
@@ -112,57 +213,70 @@ def create_app():
             for hwd in hw_designations:
                 haz_set.add(hwd)
         haz_list = list(haz_set)
-        if len(haz_list)>0:
+        if len(haz_list) > 0:
             hazwaste_info_string = ', '.join(haz_list)
         else:
             hazwaste_info_string = None
 
-        disposal_info_list = disposal_info_list
-        if len(disposal_info_list)>0:
-            disposal_info_string = ', '.join(disposal_info_list)
-        else:
-            disposal_info_string = None
+        disposal_info_string = ', '.join(disposal_info_list) if disposal_info_list else None
 
         PHS = any(PHS_list)
+        PHS_type = list(set(PHS_type)) if PHS_type else []
 
-        if len(PHS_type) > 0:
-            PHS_type = list(set(PHS_type))
-        else:
-            PHS_type = []
-
-        print(haz_waste_list)
-        print(disposal_info_string)
-        
         all_selected_pictograms = set()
         all_selected_statements = set()
 
         for cid in chemical_cids:
             selected_pictograms = request.form.getlist(f'pictograms_{cid}')
             selected_statements = request.form.getlist(f'hazard_statements_{cid}')
-            for sp in selected_pictograms:
-                all_selected_pictograms.add(sp)
-            for ss in selected_statements:
-                all_selected_statements.add(ss)
+            all_selected_pictograms.update(selected_pictograms)
+            all_selected_statements.update(selected_statements)
 
-        all_selected_statements = list(all_selected_statements)
-        danger_statements = [s.replace("Danger:","<strong>Danger:</strong>").split('(')[0] for s in all_selected_statements if "Danger:" in s]
-        warning_statements = [s.replace("Warning:","<strong>Warning:</strong>").split('(')[0] for s in all_selected_statements if "Warning:" in s]
+        danger_statements = [s.replace("Danger:", "<strong>Danger:</strong>").split('(')[0] for s in all_selected_statements if "Danger:" in s]
+        warning_statements = [s.replace("Warning:", "<strong>Warning:</strong>").split('(')[0] for s in all_selected_statements if "Warning:" in s]
         hazard_statements = danger_statements + warning_statements
 
         label_dict = {
-            'container_name' : container_name,
-            'signal_word' : signal_word,
-            'generator' : generator_name,
-            'pictograms' : list(all_selected_pictograms),
-            'hazard_statements' : hazard_statements,
-            'date' : date.today().strftime("%B %d, %Y"),
-            'disposal' : disposal_info_string,
-            'hazwaste' : hazwaste_info_string,
-            'PHS' : PHS,
-            'PHS_types' : PHS_type
+            'container_name': container_name,
+            'signal_word': signal_word,
+            'generator': generator_name,
+            'pictograms': list(all_selected_pictograms),
+            'hazard_statements': hazard_statements,
+            'date': date.today().strftime("%B %d, %Y")
+            #'disposal': disposal_info_string,
+            #'hazwaste': hazwaste_info_string,
+            #'PHS': PHS,
+            #'PHS_types': PHS_type
         }
 
-        return render_template('secondary_label.html', data = label_dict)
+        html_content = render_template('secondary_label.html', data=label_dict)
+        
+        # Determine the action based on which button was pressed
+        if 'print' in request.form:
+            try:
+                
+                pdf_path = os.path.join(user_config_dir, 'label.pdf')
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                pictogram_paths = [os.path.join(base_dir, 'static', 'img', f"{p}.png") for p in all_selected_pictograms]
+
+                create_label_pdf(container_name, signal_word, pictogram_paths, hazard_statements, generator_name, pdf_path)
+
+                #Determine OS and execute the respective print command
+                current_os = platform.system()
+                if current_os == "Windows":
+                    os.startfile(pdf_path, "print")
+                elif current_os == "Linux" or current_os == "Darwin":
+                    os.system(f'lp {pdf_path}')
+                else:
+                    raise Exception(f"Unsupported operating system: {current_os}")
+
+                return 'Label has been printed.<br><a href="/" title="Go to Home Page">Home</a>'
+            except Exception as e:
+                print(f'Did not successfully print: {e}')
+                return render_template('lookup_fail.html',msg=f"Did not successfully print: {e}")
+
+        # If 'preview' button was clicked, just render the template
+        return render_template('secondary_label.html', data=label_dict)
 
     return app
 
@@ -170,26 +284,22 @@ def enumerate(sequence, start=0):
     return zip(range(start, len(sequence) + start), sequence)
 
 def build_course_summary(search_term):
-    course_list = get_course_list()
-    best_course, _ = custom_match(search_term,course_list)[0]
-    
-    
+
     user_static_dir = CONFIG.get('user_courses_dir', 'None')
 
     # Check if user has set a valid directory
     if user_static_dir == "None" or not os.path.exists(os.path.expanduser(user_static_dir)):
-        directory_path = os.path.join('static/courses',best_course.replace(' ', ''))
+       return [], "Did not find directory with course information."
     else:
-        directory_path = os.path.join(user_static_dir,best_course.replace(' ', ''))
+        directory_path = user_static_dir
     
-    
-=======
+
+    course_list = get_course_list(directory_path)
     custom_matched = custom_match(search_term,course_list)
     best_course = ''
     if custom_matched:
         best_course, _ = custom_matched[0]
-    directory_path = os.path.join('static/courses', best_course.replace(' ', ''))
->>>>>>> 8adb06ca4d24356875955fe94c68c468ae085bd8
+    directory_path = os.path.join(directory_path, best_course.replace(' ', ''))
     exp_names = [f for f in list_experiments(best_course)]
 
     exp_summary = []
@@ -217,16 +327,9 @@ def build_course_summary(search_term):
 
     return exp_summary, best_course
         
-def get_course_list():
+def get_course_list(directory_path):
 
-    user_static_dir = CONFIG.get('user_courses_dir', 'None')
 
-    # Check if user has set a valid directory
-    if user_static_dir == "None" or not os.path.exists(os.path.expanduser(user_static_dir)):
-        directory_path = 'static/courses'
-    else:
-        directory_path = user_static_dir
-    
     course_list = []
 
     pattern = re.compile(r'^([A-Z]{4})(\d{4})$')
@@ -265,7 +368,14 @@ def list_experiments(course):
     return natsorted(txt_files)
 
 def get_experiment_chem_list(search_term):
-    course_list = get_course_list()
+
+    user_static_dir = CONFIG.get('user_courses_dir', 'None')
+    if user_static_dir == "None" or not os.path.exists(os.path.expanduser(user_static_dir)):
+        directory_path = 'static/courses'
+    else:
+        directory_path = user_static_dir
+
+    course_list = get_course_list(directory_path)
     best_course = None
     best_distance = float('inf')  # Use infinity as initial comparison value
     
@@ -280,7 +390,7 @@ def get_experiment_chem_list(search_term):
 
     # Check if user has set a valid directory
     if user_static_dir == "None" or not os.path.exists(os.path.expanduser(user_static_dir)):
-        directory_path = 'static/courses'
+        return [], "Did not find directory with course information."
     else:
         directory_path = os.path.expanduser(user_static_dir)
     
@@ -331,6 +441,175 @@ def custom_match(search_str, choices, weight_number=0.7, weight_text=0.3):
 
     # Sort the results based on the score in descending order
     return sorted(results, key=lambda x: x[1], reverse=True)
+
+def get_first_aid_info(c):
+    data = c.full_json()
+
+    results = []
+
+    SafetyInfo = next((item for item in data['Record']['Section'] if item['TOCHeading'] == 'Safety and Hazards'), None)
+    if SafetyInfo:
+        First_Aid_Info = next((item for item in SafetyInfo['Section'] if item['TOCHeading'] == 'First Aid Measures'), None)
+        if First_Aid_Info:
+            for e in First_Aid_Info["Information"]:
+                results.append(e)
+        First_Aid_Second = next((item for item in First_Aid_Info['Section'] if item['TOCHeading'] == 'First Aid'), None)
+        if First_Aid_Second:
+            for e in First_Aid_Second["Information"]:
+                results.append(e)
+    
+    results_dict = {}
+
+    named_results = [r for r in results if 'Name' in r.keys()]
+    #print(f'{len(named_results)} out of {len(results)} results had names')
+    for nr in named_results:
+        results_dict[nr['Name']] = [s['String'] for s in nr['Value']['StringWithMarkup']] 
+    
+    return results_dict
+
+
+def create_label_pdf(container_name, signal_word, pictogram_paths, hazard_statements, generator, pdf_path):
+
+    # Set up the document
+    doc = SimpleDocTemplate(pdf_path, pagesize=(4 * inch, 2 * inch), topMargin=0, bottomMargin=0, leftMargin=0.05 * inch, rightMargin=0.05 * inch)
+
+    # Container for elements
+    elements = []
+
+    # Create custom styles
+    title_style = ParagraphStyle(
+        name='TitleStyle',
+        fontName='Helvetica-Bold',
+        fontSize=14,  # Title font size
+        alignment=TA_LEFT,  # Left alignment for title
+        spaceAfter=8  # Space after the title
+    )
+
+    signal_word_style = ParagraphStyle(
+        name='SignalWordStyle',
+        fontName='Helvetica-Bold',
+        fontSize=11,
+        alignment=TA_LEFT,
+        spaceAfter=2,
+        spaceBefore=0
+    )
+
+    normal_text_style = ParagraphStyle(
+        name='NormalTextStyle',
+        fontName='Helvetica',
+        fontSize=9,  # Normal text font size
+        alignment=TA_LEFT,  # Left alignment
+        spaceAfter=0,
+        leading=9.5
+    )
+
+    small_text_style = ParagraphStyle(
+        name='NormalTextStyle',
+        fontName='Helvetica',
+        fontSize=7,  # Normal text font size
+        alignment=TA_LEFT,  # Left alignment
+        spaceAfter=0,
+        leading=7.5
+    )
+
+    # Add the title
+    title = Paragraph(f"<b>{container_name}</b>", title_style)
+    elements.append(title)
+
+    # Content for the left column
+    left_elements = []
+    signal_word = Paragraph(f"<b>{signal_word}</b>", signal_word_style)
+    left_elements.append(signal_word)
+
+    # Load and place pictograms in left column
+
+    num_pictograms = len(pictogram_paths)
+
+    # Case structure for different numbers of pictograms
+    if num_pictograms == 1:
+        # One pictogram - use a large size
+        img_size = 0.8 * inch
+        pictogram_table_data = [[Image(pictogram_paths[0], img_size, img_size)]]
+
+    elif num_pictograms == 2:
+        # Two pictograms - stack them vertically
+        img_size = 0.6 * inch
+        pictogram_table_data = [
+            [Image(pictogram_paths[0], img_size, img_size)],  # First image in the first row
+            [Image(pictogram_paths[1], img_size, img_size)]   # Second image in the second row
+        ]
+
+
+    elif num_pictograms == 3:
+        # Three pictograms - put two on the first row, one centered on the second row
+        img_size = 0.5 * inch
+        pictogram_table_data = [
+            [Image(pictogram_paths[0], img_size, img_size), Image(pictogram_paths[1], img_size, img_size)],
+            [Image(pictogram_paths[2], img_size, img_size), '']  # Second row has one pictogram, other cell is empty
+        ]
+
+    elif num_pictograms == 4:
+        # Four pictograms - two per row
+        img_size = 0.5 * inch
+        pictogram_table_data = [
+            [Image(pictogram_paths[0], img_size, img_size), Image(pictogram_paths[1], img_size, img_size)],
+            [Image(pictogram_paths[2], img_size, img_size), Image(pictogram_paths[3], img_size, img_size)]
+        ]
+
+    elif num_pictograms > 4:
+        # More than four pictograms - dynamically handle with smaller sizes
+        img_size = 0.4 * inch
+        pictogram_images = [Image(pictogram, img_size, img_size) for pictogram in pictogram_paths]
+        pictogram_table_data = [pictogram_images[i:i+2] for i in range(0, len(pictogram_images), 2)]  # Two per row
+
+    pictogram_table = Table(pictogram_table_data)
+
+    pictogram_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),  # Align images vertically
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),   # Align images horizontally
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),    # Remove left padding
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),   # Remove right padding
+        ('TOPPADDING', (0, 0), (-1, -1), 0),     # Remove top padding
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),  # Remove bottom padding
+        ('GRID', (0, 0), (-1, -1), 0, colors.white)  # Optional: Remove grid borders
+    ]))
+
+
+    left_elements.append(pictogram_table)
+
+    # Content for the right column
+    right_elements = []
+
+    for statement in hazard_statements:
+        right_elements.append(Paragraph(statement, normal_text_style))
+
+    table_data = [[left_elements, right_elements]]
+
+    table = Table(table_data, colWidths=[1 * inch, 2.8 * inch])
+
+    # Style the table (optional)
+    table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),  # Align content to the top of each cell
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),    # Remove left padding
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),   # Remove right padding
+        ('TOPPADDING', (0, 0), (-1, -1), 0),     # Remove top padding
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),  # Remove bottom padding
+        ('GRID', (0, 0), (-1, -1), 0, colors.white)  # Optional: Remove grid borders
+    ]))
+
+    # Add the table (2-column layout) to elements
+    elements.append(table)
+
+    # Add a footer
+    now = datetime.now()
+    formatted_date = now.strftime("%b %d, %Y")
+    generator = Paragraph(f"{generator} — {formatted_date}", small_text_style)
+    elements.append(generator)
+
+    # Build the PDF with elements
+    doc.build(elements)
+    return 0
+    
 
 def dashboard():
     app = create_app()

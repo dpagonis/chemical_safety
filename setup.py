@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="chemical_safety",
-    version="0.0.8",
+    version="1.0.5",
     description="A package for retreiving chemical safety information",
     author="Demetrios Pagonis",
     author_email="demetriospagonis@weber.edu",
@@ -20,7 +20,8 @@ setup(
         'natsort',
         'flask',
         'scipy',
-        'rdkit'
+        'rdkit',
+        'reportlab'
     ],
     entry_points={
         'console_scripts': [

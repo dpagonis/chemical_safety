@@ -14,6 +14,7 @@ from rdkit import Chem as rdkChem
 from rdkit.Chem import Draw as rdkDraw
 from scipy import stats
 import numpy as np
+import sqlite3
 
 from .molecule import molecule
 
@@ -34,8 +35,57 @@ and its code is clean and readable.
 
 But the important thing about My_Class is that it isn't garbage.
 """
+
+# molecule class should get pyPI'ed and then be a dependency
+# all my chemistry-specific stuff should go to a single package (molecule, periodictable, sigfig, units)
  
 WSU_PCODES_LIST = {'P222','P223','P250','P262','P263','P411','P412'}
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+db_path = os.path.join(BASE_DIR, 'data', 'chemical.db')
+
+def init_db():
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    # Create 'chemical' table if it doesn't exist
+    cursor.execute('''CREATE TABLE IF NOT EXISTS chemical (
+                      cid INTEGER UNIQUE,
+                      name TEXT,
+                      IUPAC_name TEXT,
+                      SMILES TEXT,
+                      formula TEXT,
+                      LD50_oral REAL,
+                      LD50_dermal REAL,
+                      LC50 REAL,
+                      signal_word TEXT,
+                      pictograms TEXT,
+                      hazard_statements TEXT,
+                      hazard_codes TEXT,
+                      p_codes TEXT,
+                      p_statements TEXT,
+                      PHS INTEGER,
+                      carcinogen INTEGER,
+                      reproductive_toxin INTEGER,
+                      acute_toxin INTEGER,
+                      GHS_info_missing INTEGER,
+                      PHS_info TEXT,
+                      flash_point REAL,
+                      boiling_point REAL,
+                      melting_point REAL,
+                      density REAL,
+                      flammability_class TEXT,
+                      flammability_class_info TEXT,
+                      peroxide_class TEXT,
+                      peroxide_class_info TEXT,
+                      hazardous_waste TEXT,
+                      hazardous_waste_info TEXT,
+                      disposal_info TEXT,
+                      PRIMARY KEY(cid))''')
+
+    conn.commit()
+    conn.close()
+init_db()
+
 
 class chemical:
     def __init__(self,chemical_name,cid=None):
@@ -46,30 +96,132 @@ class chemical:
             self.name = chemical_name
             self.cid = self._get_cid(chemical_name)
 
-        self.LD50_oral = None
-        self.LD50_dermal = None
-        self.LC50 = None
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
 
-        self._full_json = self._get_pubchem_data(self.cid)
-        self.full_name = self._full_json["Record"]["RecordTitle"]
+        cursor.execute("SELECT * FROM chemical WHERE cid = ?", (self.cid,))
+        row = cursor.fetchone()
+
+        if row:
+            # CID exists in the database, extract the named data from the row
+            (
+                self.cid, 
+                self.full_name, 
+                self.IUPAC_name, 
+                self.SMILES, 
+                self.formula, 
+                self.LD50_oral, 
+                self.LD50_dermal, 
+                self.LC50, 
+                self.signal_word, 
+                pictogram_string,
+                haz_statement_string,
+                haz_codes_string,
+                p_codes_string,
+                p_statement_string,
+                phs,
+                carcinogen,
+                repro_tox,
+                acute_tox,
+                self.WSU_No_GHS, 
+                phc_string,
+                self.flash_point, 
+                self.boiling_point, 
+                self.melting_point, 
+                self.density, 
+                self.flammability_class, 
+                self.flammability_class_info, 
+                self.peroxide_class, 
+                self.peroxide_class_info, 
+                self.hazardous_waste, 
+                self.hazardous_waste_info, 
+                disposal_info_string
+            ) = row
+            
+            self.WSU_particularly_hazardous = _sql_to_bool(phs)
+            self.WSU_carcinogen = _sql_to_bool(carcinogen)
+            self.WSU_reproductive_toxin = _sql_to_bool(repro_tox)
+            self.WSU_highly_acute_toxin = _sql_to_bool(acute_tox)  
+            
+            self.pictograms = [ p for p in pictogram_string.split(',')]
+            self.hazard_statements = [ s for s in haz_statement_string.split(',')]
+            self.hazard_codes = [ s for s in haz_codes_string.split(',')]
+            self.p_codes  = [ s for s in p_codes_string.split(',')]
+            self.p_statements  = [ s for s in p_statement_string.split(',')]
+            key_value_pairs = phc_string.split(',')
+            self.WSU_PHC_info = {}
+
+            if phc_string:
+                key_value_pairs = phc_string.split(',')
+                for pair in key_value_pairs:
+                    if ':' in pair:
+                        key, value = pair.split(':', 1)  # Split only on the first colon found
+                        self.WSU_PHC_info[key] = value
+
+            self.disposal_info = [ s for s in disposal_info_string.split(',')]
+
+            self._full_json = None
+            self.dp_molecule=molecule(self.formula)
+        else:
+            self._full_json = self._get_pubchem_data(self.cid)
+            self.LD50_oral = None
+            self.LD50_dermal = None
+            self.LC50 = None
+            self.full_name = self._full_json["Record"]["RecordTitle"]
+            self.dp_molecule, self.SMILES, self.IUPAC_name = self._parse_molecular_info()
+            self.signal_word , self.pictograms, self.hazard_statements, self.hazard_codes, self.p_statements, self.p_codes = self._parse_GHS()
+            self.WSU_particularly_hazardous, self.WSU_carcinogen, self.WSU_reproductive_toxin, self.WSU_highly_acute_toxin, self.WSU_No_GHS, self.WSU_PHC_info = self._check_if_particularly_hazardous()
+            self.flash_point, self.boiling_point, self.melting_point, self.density = self._parse_physical_properties() 
+            self.flammability_class, self.flammability_class_info = self._parse_flammability_info()
+            self.peroxide_class, self.peroxide_class_info = self._parse_peroxide_info()
+            self.hazardous_waste, self.hazardous_waste_info = self._parse_hazardous_waste_info()
+            self.disposal_info = self._parse_disposal_info()
+
+            self.name =  self.full_name if self.name is None else self.name
+
+            # Insert chemical data into the database
+            cursor.execute('''
+                INSERT OR REPLACE INTO chemical (
+                    cid, name, IUPAC_name, SMILES, formula, LD50_oral, LD50_dermal, LC50, 
+                    signal_word, pictograms, hazard_statements, hazard_codes, 
+                    p_codes, p_statements, PHS, carcinogen, reproductive_toxin, 
+                    acute_toxin, GHS_info_missing, PHS_info, flash_point, 
+                    boiling_point, melting_point, density, flammability_class, 
+                    flammability_class_info, peroxide_class, peroxide_class_info, 
+                    hazardous_waste, hazardous_waste_info, disposal_info
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                self.cid, self.name, self.IUPAC_name, self.SMILES, 
+                self.dp_molecule.formula, self.LD50_oral, self.LD50_dermal, self.LC50, 
+                self.signal_word, ','.join(self.pictograms), ','.join(self.hazard_statements), 
+                ','.join(self.hazard_codes), ','.join(self.p_codes), ','.join(self.p_statements), 
+                self.WSU_particularly_hazardous, self.WSU_carcinogen, self.WSU_reproductive_toxin, 
+                self.WSU_highly_acute_toxin, self.WSU_No_GHS, ','.join(f"{key}:{value}" for key, value in self.WSU_PHC_info.items()), 
+                self.flash_point, self.boiling_point, self.melting_point, 
+                self.density, self.flammability_class, self.flammability_class_info, 
+                self.peroxide_class, self.peroxide_class_info, 
+                self.hazardous_waste, self.hazardous_waste_info, 
+                ','.join(self.disposal_info)
+            ))
+
+            conn.commit()
+
+        # Close the connection
+        conn.close()
         self.name =  self.full_name if self.name is None else self.name
-
         self.name_difference = self._parse_name_difference()
 
-        self.dp_molecule, self.SMILES, self.IUPAC_name = self._parse_molecular_info()
+        
+    def full_json(self):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        cache_folder = os.path.join(script_dir, 'data')
+        cache_file_path = os.path.join(cache_folder, f'{self.cid}.json')
 
-        self.signal_word , self.pictograms, self.hazard_statements, self.hazard_codes, self.p_statements, self.p_codes = self._parse_GHS()
+        data = None
 
-        self.WSU_particularly_hazardous, self.WSU_carcinogen, self.WSU_reproductive_toxin, self.WSU_highly_acute_toxin, self.WSU_No_GHS, self.WSU_PHC_info = self._check_if_particularly_hazardous()
-
-        self.flash_point, self.boiling_point, self.melting_point, self.density = self._parse_physical_properties() 
-        self.flammability_class, self.flammability_class_info = self._parse_flammability_info()
-
-        self.peroxide_class, self.peroxide_class_info = self._parse_peroxide_info()
-
-        self.hazardous_waste, self.hazardous_waste_info = self._parse_hazardous_waste_info()
-
-        self.disposal_info = self._parse_disposal_info()
+        with open(cache_file_path, 'r') as file:
+            data = json.load(file)
+        return data
 
     def _get_cid(self,compound_name, recursive=True):
         try:
@@ -179,15 +331,20 @@ class chemical:
     def _parse_molecular_info(self):
         molec = None
         IUPAC_name_string = ''
+        SMILES_string = ''
         Identifiers = next((item for item in self._full_json['Record']['Section'] if item['TOCHeading'] == 'Names and Identifiers'), None)
         if Identifiers:
             MolecFormula = next((item for item in Identifiers['Section'] if item['TOCHeading'] == 'Molecular Formula'), None)
             if MolecFormula: 
                 for i in MolecFormula['Information']:
                     mf_string = i['Value']['StringWithMarkup'][0]['String']
-                    mf_string = mf_string.replace('.','')
-                    mf_string = mf_string.replace('[','(')
-                    mf_string = mf_string.replace(']',')')
+                    
+                    # Replace brackets with parentheses
+                    mf_string = mf_string.replace('[', '(').replace(']', ')')
+                    
+                    # Remove unwanted characters, keeping only letters, numbers, and parentheses
+                    mf_string = re.sub(r'[^a-zA-Z0-9()]', '', mf_string)
+                    
                     if len(mf_string) > 0:
                         molec = molecule(mf_string)
                         break
@@ -253,6 +410,9 @@ class chemical:
             if Markup:
                 for m in Markup:
                     pictogram_list.append(m['Extra'])
+        
+        pictogram_list = [p.replace(' ', '_') for p in pictogram_list]
+
 
         Signal = next((item for item in GHS['Information'] if item['Name'] == 'Signal' and item['ReferenceNumber'] == reference_num), None)
         if Signal:
@@ -412,7 +572,7 @@ class chemical:
         OSHA_known = False
         NTP_known = False 
         NTP_anticipated = False 
-        IARC = False 
+        IARC_group = '' 
         IARC_classification = 'Not listed'
         lists = []
 
@@ -440,19 +600,19 @@ class chemical:
         df_IARC = pd.read_csv(data_file_path)
         IARC_classification = df_IARC.loc[df_IARC['cid'] == self.cid, 'group']
         if not IARC_classification.empty:
-            lists.append(f'IARC classification: Group {IARC_classification.iloc[0]}')
-            IARC = True
+            IARC_group = IARC_classification.iloc[0]
+            lists.append(f'IARC classification: Group {IARC_group}')
+            
 
         WSU_CHP_carcinogen = False
-        if OSHA_known or NTP_known or IARC == '1':
+        if OSHA_known or NTP_known or IARC_group == '1':
             sCertainty = "Known carcinogen"
             WSU_CHP_carcinogen = True
-        elif NTP_anticipated or IARC == '2A':
+        elif NTP_anticipated or IARC_group == '2A':
             sCertainty = "Probable carcinogen"
             WSU_CHP_carcinogen = True
-        elif IARC == '2B':
+        elif IARC_group == '2B':
             sCertainty = "Possible carcinogen"
-            WSU_CHP_carcinogen = True
         else:
             sCertainty = "Not a known carcinogen"
         
@@ -828,13 +988,13 @@ class chemical:
     
 def _fudged_stats(data):
     #takes a list of data and tries to guess what data is real and what is garbage
-    # mostly used to take values of BP/MP/density and throw out the random numbers that were incorrectly included (e.g. years)
+    # mostly used to take values of density and throw out the random numbers that were incorrectly included (e.g. years)
     
     data = np.array(data)
     
     # Step 1: Compute initial mean and mode
     initial_mean = np.mean(data)
-    mode_value, mode_count = stats.mode(data)
+    mode_value, mode_count = stats.mode(data, keepdims = True)
     
     # Step 2: Identify and remove outliers using the interquartile range (IQR) method
     Q1 = np.percentile(data, 25)
@@ -846,7 +1006,7 @@ def _fudged_stats(data):
     
     # Step 3: Recompute mean and mode of cleaned data
     cleaned_mean = np.mean(cleaned_data) if cleaned_data.size > 0 else initial_mean
-    cleaned_mode_result = stats.mode(cleaned_data, nan_policy='omit')
+    cleaned_mode_result = stats.mode(cleaned_data, nan_policy='omit', keepdims = True)
     
     if isinstance(cleaned_mode_result.mode, np.ndarray):
         cleaned_mode_value = cleaned_mode_result.mode[0] if cleaned_mode_result.mode.size > 0 else None
@@ -860,46 +1020,31 @@ def _fudged_stats(data):
         return cleaned_mode_value
     else:
         return cleaned_mean
-        
-
-if __name__ == "__main__":
-    from molecule import molecule
-
-    chem = chemical('bromine')
-    print('')
-    print(chem.full_name)
-    print(chem.SMILES)
-    # if chem.name_difference:
-    #     print(chem.name)
     
-    # if(chem.dp_molecule):
-    #     print(chem.dp_molecule.formula)
 
-    # for hs in chem.hazard_statements:
-    #     print(hs)
-    
-    # if chem.WSU_particularly_hazardous:
-    #     print('')
-    #     print("PARTICULARLY HAZARDOUS SUBSTANCE")
-    #     print("Carcinogen:",chem.WSU_carcinogen)
-    #     print("Reproductive toxin:",chem.WSU_reproductive_toxin)
-    #     print("Acute toxin:",chem.WSU_highly_acute_toxin, f'{chem.LD50_oral}/50 oral, {chem.LD50_dermal}/200 dermal, {chem.LC50}/200 inhalation')
-        
-    #     for k in chem.WSU_PHC_info.keys():
-    #         print(k,chem.WSU_PHC_info[k])
+def _sql_to_bool(input):
+    # If the input is already a boolean, return it directly
+    if isinstance(input, bool):
+        return input
 
-    # if chem.hazardous_waste:
-    #     print('')
-    #     print("HAZARDOUS WASTE")
-    #     print(chem.hazardous_waste_info)
-    
-    # if chem.p_statements:
-    #     print('')
-    #     for p in chem.p_statements:
-    #         print(p)
-    
-    # print('')
-    # print('Flam class', chem.flammability_class)
-    # print('perox',chem.peroxide_class)
+    # If the input is a string, parse '1' as True and '0' as False
+    if isinstance(input, str):
+        input = input.strip()  # Remove any leading/trailing whitespace
+        if input == '1':
+            return True
+        elif input == '0':
+            return False
+        else:
+            raise ValueError(f"Invalid string for boolean conversion: '{input}'")
 
-    
+    # If the input is a numeric type (int or float), parse 1 as True and 0 as False
+    if isinstance(input, (int, float)):
+        if input == 1:
+            return True
+        elif input == 0:
+            return False
+        else:
+            raise ValueError(f"Invalid number for boolean conversion: {input}")
+
+    # If the input type is unsupported, raise an error
+    raise TypeError(f"Unsupported type for boolean conversion: {type(input)}")
