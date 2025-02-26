@@ -526,6 +526,7 @@ def create_label_pdf(container_name, signal_word, pictogram_paths, hazard_statem
     num_pictograms = len(pictogram_paths)
 
     # Case structure for different numbers of pictograms
+    pictogram_table_data=[]
     if num_pictograms == 1:
         # One pictogram - use a large size
         img_size = 0.8 * inch
@@ -562,20 +563,21 @@ def create_label_pdf(container_name, signal_word, pictogram_paths, hazard_statem
         pictogram_images = [Image(pictogram, img_size, img_size) for pictogram in pictogram_paths]
         pictogram_table_data = [pictogram_images[i:i+2] for i in range(0, len(pictogram_images), 2)]  # Two per row
 
-    pictogram_table = Table(pictogram_table_data)
+    if len(pictogram_table_data) > 0:
+        pictogram_table = Table(pictogram_table_data)
 
-    pictogram_table.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),  # Align images vertically
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),   # Align images horizontally
-        ('LEFTPADDING', (0, 0), (-1, -1), 0),    # Remove left padding
-        ('RIGHTPADDING', (0, 0), (-1, -1), 0),   # Remove right padding
-        ('TOPPADDING', (0, 0), (-1, -1), 0),     # Remove top padding
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),  # Remove bottom padding
-        ('GRID', (0, 0), (-1, -1), 0, colors.white)  # Optional: Remove grid borders
-    ]))
+        pictogram_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),  # Align images vertically
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),   # Align images horizontally
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),    # Remove left padding
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),   # Remove right padding
+            ('TOPPADDING', (0, 0), (-1, -1), 0),     # Remove top padding
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),  # Remove bottom padding
+            ('GRID', (0, 0), (-1, -1), 0, colors.white)  # Optional: Remove grid borders
+        ]))
 
 
-    left_elements.append(pictogram_table)
+        left_elements.append(pictogram_table)
 
     # Content for the right column
     right_elements = []
