@@ -39,7 +39,7 @@ But the important thing about My_Class is that it isn't garbage.
 # molecule class should get pyPI'ed and then be a dependency
 # all my chemistry-specific stuff should go to a single package (molecule, periodictable, sigfig, units)
  
-WSU_PCODES_LIST = {'P222','P223','P250','P262','P263','P411','P412'}
+WSU_PCODES_LIST = {'P222','P223','P250','P262','P263','P411','P412'} #there are too many P Codes. These are the ones we decided to include in the dashboard. 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 db_path = os.path.join(BASE_DIR, 'data', 'chemical.db')
@@ -88,13 +88,13 @@ init_db()
 
 
 class chemical:
-    def __init__(self,chemical_name,cid=None):
+    def __init__(self,chemical_name,cid=None,spell_check=True):
         if chemical_name is None and cid is not None:
             self.cid = cid
             self.name = None
         else:
             self.name = chemical_name
-            self.cid = self._get_cid(chemical_name)
+            self.cid = self._get_cid(chemical_name,recursive=spell_check)
 
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -351,7 +351,7 @@ class chemical:
 
             CDs = next((item for item in Identifiers['Section'] if item['TOCHeading'] == 'Computed Descriptors'), None)
             if CDs:
-                SMILES_entry = next((item for item in CDs['Section'] if item['TOCHeading'] == 'Canonical SMILES'), None)
+                SMILES_entry = next((item for item in CDs['Section'] if item['TOCHeading'] == 'SMILES' or item['TOCHeading'] == 'Canonical SMILES'), None)
                 if SMILES_entry: 
                     for i in SMILES_entry['Information']:
                         SMILES_string = i['Value']['StringWithMarkup'][0]['String']

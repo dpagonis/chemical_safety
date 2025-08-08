@@ -6,13 +6,12 @@
     <title>WSU Secondary Container Label</title>
     <style>
         @page {
-            size: 4in 2in; /* Set page size to 4x2 inches */
-            margin: 0;     /* Remove margins */
+            margin: 0;     
         }
         body { 
             font-family: Arial, sans-serif; 
             font-size: 12px; 
-            margin: 0; 
+            margin: 0.2in; 
             padding: 0; 
             width: 4in;  /* Explicit page width */
             height: 2in; /* Explicit page height */
@@ -37,7 +36,6 @@
             top: 40px;
             left: 0;
             width: 160px; /* 40% of the container's width */
-            height: 160px;
             box-sizing: border-box;
         }
 
@@ -46,7 +44,6 @@
             top: 40px;
             right: 0;
             width: 240px; /* 60% of the container's width */
-            height: 160px;
             box-sizing: border-box;
         }
         .pictograms {
@@ -55,8 +52,8 @@
             margin-bottom: 5px; /* Reduce margin for tight fit */
         }
         .pictograms img { 
-            width: 35px; 
-            height: 35px; 
+            width: 50px; 
+            height: 50px; 
             margin-right: 3px; 
             margin-bottom: 3px;
         }
@@ -76,10 +73,8 @@
             margin-bottom: 5px;
         }
         .text {
+            margin-top: 10px;
             font-size: 10px;
-            position: absolute; 
-            bottom: 0; /* Stick the text to the bottom of the column */
-            left: 0;
         }
     </style>
 </head>
@@ -93,7 +88,7 @@
             {% if data['pictograms'] %}
             <div class='pictograms'>
                 {% for p in data['pictograms'] %}
-                    <img src='static/img/{{p}}.png' alt="{{p}}">
+                    <img src='static/img/{{p}}.svg' alt="{{p}}">
                     {% if loop.index is divisibleby 2 %}  <!-- Add a <br> after every second image -->
                         <br>
                     {% endif %}
@@ -119,9 +114,10 @@
                 {% endfor %}
             </ul>
             {% endif %}
-
             <div class="text">{{data['generator']}}, {{ data['date'] }}</div>
         </div>
+        
     </div>
+    
 </body>
 </html>
