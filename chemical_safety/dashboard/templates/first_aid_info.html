@@ -14,6 +14,11 @@
   </header>
 
   <h1>{{name}} — First Aid Information</h1> <!-- Update the page title for each specific page -->
+  {% if chemical.name_difference %}
+    <div style="background-color: #fff3cd; border: 2px solid #ffc107; padding: 10px; margin: 10px 0; border-radius: 5px;">
+      <strong>⚠️ Note:</strong> Search term "<strong>{{ chemical.name }}</strong>" autocorrected to "<strong>{{ chemical.full_name }}</strong>"
+    </div>
+  {% endif %}
 
   <div>
     {% for key, value in result.items() %}

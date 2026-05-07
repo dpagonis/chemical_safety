@@ -45,6 +45,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 db_path = os.path.join(BASE_DIR, 'data', 'chemical.db')
 
 def init_db():
+    # Ensure the data directory exists
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     # Create 'chemical' table if it doesn't exist
@@ -947,6 +949,16 @@ class chemical:
                 haz_waste_info = 'U Listed Waste'
             else:
                 haz_waste_info += ', U Listed Waste'
+
+        flam_triggers = [
+            self.flammability_class in ['IA','IB','IC','II','IIIA']
+        ]
+        if any(flam_triggers):
+            haz_waste = True
+            if haz_waste_info is None:
+                haz_waste_info = 'Ignitable'
+            else:
+                haz_waste_info += ', Ignitable'
         
         return haz_waste, haz_waste_info
     
@@ -965,12 +977,13 @@ class chemical:
             'H411' in self.hazard_codes
         ]
 
-
         if any(corrosive_triggers):
-            disposal_info.append('Corrosive')
+            disposal_info.append('Possibly corrosive (pH < 2 or pH > 12.5)')
         
         if any(env_tox_triggers):
                 disposal_info.append('Environmentally Toxic')
+
+        
 
         return disposal_info
     

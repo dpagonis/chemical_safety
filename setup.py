@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="chemical_safety",
-    version="1.1.0",
+    version="1.1.3",
     description="A package for retreiving chemical safety information",
     author="Demetrios Pagonis",
     author_email="demetriospagonis@weber.edu",

@@ -38,7 +38,19 @@ def create_app():
 
     @app.route('/')
     def home():
-        return render_template('index.html')
+        inventory_dir = CONFIG['inventory_dir']
+        if os.path.exists(os.path.expanduser(inventory_dir)):
+            inventory_info=True
+        else:
+            inventory_info=False
+
+        course_dir = CONFIG['user_courses_dir']
+        if os.path.exists(os.path.expanduser(course_dir)):
+            course_info=True
+        else:
+            course_info=False
+
+        return render_template('index.html', course_info=course_info, inventory_info=inventory_info)
 
     @app.route('/chemical_lookup')
     def chemical_lookup():
@@ -186,8 +198,10 @@ def create_app():
             elif lookup_type == 'first_aid':
                 c = chemical(search_term)
                 result = get_first_aid_info(c)
-                return render_template('first_aid_info.html', name=c.full_name, result=result)
+                return render_template('first_aid_info.html', name=c.full_name, result=result, chemical=c)
             elif lookup_type == 'secondary':
+                if len(search_term) == 0:
+                    return render_template('custom_secondary_label_builder.html')
                 result = [chemical(c) for c in search_term.split(', ')]
                 return render_template('secondary_label_builder.html', lookup_type=lookup_type, result=result)
             else:
@@ -248,8 +262,6 @@ def create_app():
             #'PHS': PHS,
             #'PHS_types': PHS_type
         }
-
-        html_content = render_template('secondary_label.html', data=label_dict)
         
         # Determine the action based on which button was pressed
         if 'print' in request.form:

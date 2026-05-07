@@ -34,6 +34,11 @@
       {% for chemical in result %}
         <fieldset>
             <h3>{{ chemical.full_name }}</h3>
+            {% if chemical.name_difference %}
+              <div style="background-color: #fff3cd; border: 2px solid #ffc107; padding: 8px; margin: 8px 0; border-radius: 5px; font-size: 0.9em;">
+                <strong>⚠️ Note:</strong> Search term "<strong>{{ chemical.name }}</strong>" autocorrected to "<strong>{{ chemical.full_name }}</strong>"
+              </div>
+            {% endif %}
             <div class='pictograms'>
                 <h4>Pictograms:</h4>
                 {% for pictogram in chemical.pictograms %}

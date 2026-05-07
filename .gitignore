@@ -1,4 +1,4 @@
-chemical_safety/chemical/data/
+chemical_safety/chemical/data/*.json
 wsu_inventory/
 development_scratch/
 build/
