@@ -18,6 +18,8 @@ import sqlite3
 
 from .molecule import molecule
 
+from .logs import log_pugview, log_pugrest
+
 """
 The Important Thing About My_Class
 
@@ -256,6 +258,7 @@ class chemical:
         
         search_url = f'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded_compound_name}/cids/JSON'
         response = requests.get(search_url)
+        log_pugrest(response)
 
         if response.status_code == 200:
             data = response.json()
@@ -268,6 +271,7 @@ class chemical:
             # initial lookup failed. need to get a little fuzzy with the autocomplete API
             autocomplete_url = f'https://pubchem.ncbi.nlm.nih.gov/rest/autocomplete/Compound/{encoded_compound_name}/json'
             response = requests.get(autocomplete_url)
+            log_pugrest(response)
 
             if response.status_code == 200:
                 data = response.json()
@@ -310,6 +314,7 @@ class chemical:
             try:
                 # Make the request to the PubChem API
                 response = requests.get(search_url)
+                log_pugview(response)
                 response.raise_for_status()  # Raise an error for bad status codes
                 data = response.json()
 

@@ -16,6 +16,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Image, Frame, Space
 from reportlab.lib.enums import TA_LEFT
 
 from chemical_safety.chemical import chemical
+from chemical_safety.chemical.logs import PUG_VIEW_LOG_PATH, PUG_REST_LOG_PATH
 
 # Define the paths
 package_config_path = os.path.join(os.path.dirname(__file__), 'config.json')
@@ -290,7 +291,20 @@ def create_app():
         # If 'preview' button was clicked, just render the template
         return render_template('secondary_label.html', data=label_dict)
 
+    @app.route('/logs')
+    def logs():
+
+        with open(PUG_VIEW_LOG_PATH, "r") as f:
+            pvlog = f.read().splitlines()[-200:]
+
+        with open(PUG_REST_LOG_PATH, "r") as f:
+            prlog = f.read().splitlines()[-200:]
+
+        return render_template('logs.html', pug_view_log=pvlog, pug_rest_log=prlog)
+
     return app
+
+
 
 def enumerate(sequence, start=0):
     return zip(range(start, len(sequence) + start), sequence)
