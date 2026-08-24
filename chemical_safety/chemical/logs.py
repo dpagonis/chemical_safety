@@ -39,7 +39,7 @@ def _make_logstring(response):
     return f"{response.status_code} {reason}: {error_body}"
 
 def _log(path,logstring):
-    with open(path, "a") as f:
-        line = f'{datetime.now().strftime("%Y-%m-%d %H:%M:%S")} — {logstring}\n'
+    with open(path, "a", encoding='utf-8') as f:
+        line = f'{datetime.now().strftime("%Y-%m-%d %H:%M:%S")} - {logstring}\n'
         f.write(line)
     return
